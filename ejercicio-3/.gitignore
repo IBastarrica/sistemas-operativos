@@ -1,0 +1,12 @@
+# Base de datos SQLite generada al ejecutar
+*.sq3
+data.sq3
+
+# Logs generados al ejecutar
+*.log
+system.log
+error.log
+
+# Archivos temporales
+*~
+.DS_Store
