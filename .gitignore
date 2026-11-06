@@ -1,2 +1,6 @@
 # Notas personales (no subir a GitHub)
 notas.md
+
+# Archivos generados al ejecutar los scripts (no subir a GitHub)
+*.sq3
+*.log
