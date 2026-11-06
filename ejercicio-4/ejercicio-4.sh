@@ -37,23 +37,23 @@ declare USUARIO_NOMBRE_LOGUEADO=""
 # Utilidades de dialog
 # ----------------------------------------------------------------------------
 
-# dialog escribe su salida por stderr (fd 2). Con esta funcion capturamos
-# correctamente lo que el usuario elige/escribe.
+# dialog escribe su respuesta por stderr (fd 2).
+# Con esta forma capturamos correctamente lo que el usuario elige/escribe:
+#   2>&1 1>/dev/tty  -> stderr va al pipe de captura, stdout va a la terminal
 capturar_dialog() {
-    # Ejecutar dialog y capturar su stderr (la respuesta del usuario)
-    "$@" 2>&1 >/dev/tty
+    "$@" 2>&1 1>/dev/tty
 }
 
 mostrar_mensaje() {
     local titulo="$1"
     local mensaje="$2"
-    dialog --clear --title "$titulo" --msgbox "$mensaje" 0 0 2>&1 >/dev/tty
+    dialog --clear --title "$titulo" --msgbox "$mensaje" 0 0 2>&1 1>/dev/tty
     return $?
 }
 
 mostrar_error() {
     local mensaje="$1"
-    dialog --clear --title "Error" --msgbox "$mensaje" 0 0 2>&1 >/dev/tty
+    dialog --clear --title "Error" --msgbox "$mensaje" 0 0 2>&1 1>/dev/tty
     return $?
 }
 
@@ -162,9 +162,12 @@ registrar_usuario() {
     local clave_rep=""
 
     usuario=$(capturar_dialog dialog --clear --title "REGISTRO DE USUARIO" \
-        --inputbox "Nombre de usuario:" 0 0 2>&1 >/dev/tty)
+        --inputbox "Nombre de usuario:" 0 0)
     local rc=$?
     [[ $rc -ne 0 ]] && return 1   # usuario cancelo
+
+    # Limpiar posibles espacios o saltos de linea
+    usuario=$(printf '%s' "$usuario" | tr -d '[:space:]')
 
     if [[ -z $usuario ]]; then
         mostrar_error "El usuario no puede estar vacio."
@@ -179,7 +182,7 @@ registrar_usuario() {
     fi
 
     clave=$(capturar_dialog dialog --clear --title "REGISTRO DE USUARIO" \
-        --passwordbox "Clave:" 0 0 2>&1 >/dev/tty)
+        --insecure --passwordbox "Clave:" 0 0)
     rc=$?
     [[ $rc -ne 0 ]] && return 1
 
@@ -190,7 +193,7 @@ registrar_usuario() {
     fi
 
     clave_rep=$(capturar_dialog dialog --clear --title "REGISTRO DE USUARIO" \
-        --passwordbox "Repita la clave:" 0 0 2>&1 >/dev/tty)
+        --insecure --passwordbox "Repita la clave:" 0 0)
     rc=$?
     [[ $rc -ne 0 ]] && return 1
 
@@ -221,12 +224,12 @@ iniciar_sesion() {
     local id_usuario=""
 
     usuario=$(capturar_dialog dialog --clear --title "INICIAR SESION" \
-        --inputbox "Usuario:" 0 0 2>&1 >/dev/tty)
+        --inputbox "Usuario:" 0 0)
     local rc=$?
     [[ $rc -ne 0 ]] && return 1
 
     clave=$(capturar_dialog dialog --clear --title "INICIAR SESION" \
-        --passwordbox "Clave:" 0 0 2>&1 >/dev/tty)
+        --insecure --passwordbox "Clave:" 0 0)
     rc=$?
     [[ $rc -ne 0 ]] && return 1
 
@@ -263,18 +266,20 @@ menu_acceso() {
         opcion=$(capturar_dialog dialog --clear --title "ACCESO" \
             --menu "Seleccione una opcion:" 0 0 2 \
             1 "Iniciar sesion" \
-            2 "Registrar usuario" \
-            2>&1 >/dev/tty)
+            2 "Registrar usuario")
         local rc=$?
         [[ $rc -ne 0 ]] && return 1   # usuario cerro el dialog
 
-        case $opcion in
-            $OPCION_LOGIN)
+        # Limpiar espacios, saltos de linea y caracteres extra
+        opcion=$(printf '%s' "$opcion" | tr -d '[:space:]')
+
+        case "$opcion" in
+            "$OPCION_LOGIN")
                 if iniciar_sesion; then
                     return 0
                 fi
                 ;;
-            $OPCION_REGISTRO)
+            "$OPCION_REGISTRO")
                 registrar_usuario
                 ;;
             *)
@@ -376,9 +381,11 @@ editar() {
 
     local nuevo_precio
     nuevo_precio=$(capturar_dialog dialog --clear --title "EDITAR PRODUCTO" \
-        --inputbox "Ingrese nuevo precio para el producto $id:" 0 0 2>&1 >/dev/tty)
+        --inputbox "Ingrese nuevo precio para el producto $id:" 0 0)
     local rc=$?
     [[ $rc -ne 0 ]] && return
+
+    nuevo_precio=$(printf '%s' "$nuevo_precio" | tr -d '[:space:]')
 
     if [[ -z $nuevo_precio ]]; then
         mostrar_error "El precio no puede estar vacio."
@@ -411,13 +418,13 @@ mostrar() {
         done <<< "$resultado"
     fi
 
-    dialog --clear --title "INVENTARIO" --msgbox "$texto" 0 0 2>&1 >/dev/tty
+    dialog --clear --title "INVENTARIO" --msgbox "$texto" 0 0 2>&1 1>/dev/tty
     log_sistema "MOSTRAR inventario"
 }
 
 bienvenida() {
     dialog --clear --title "BIENVENIDO" \
-        --msgbox "Bienvenido/a al sistema de inventario (TUI).\n\nBase de datos: $DB_FILE" 0 0 2>&1 >/dev/tty
+        --msgbox "Bienvenido/a al sistema de inventario (TUI).\n\nBase de datos: $DB_FILE" 0 0 2>&1 1>/dev/tty
 }
 
 # ----------------------------------------------------------------------------
@@ -425,11 +432,16 @@ bienvenida() {
 # ----------------------------------------------------------------------------
 
 main() {
+    # Desactivar el parpadeo del cursor del terminal durante los menus TUI
+    setterm -cursor off 2>/dev/null || true
+
     # Verificar dependencias
     if ! verificar_dialog; then
+        setterm -cursor on 2>/dev/null || true
         return 1
     fi
     if ! verificar_sqlite3; then
+        setterm -cursor on 2>/dev/null || true
         return 1
     fi
 
@@ -440,6 +452,7 @@ main() {
 
     if ! menu_acceso; then
         mostrar_mensaje "Acceso denegado" "No se pudo iniciar sesion."
+        setterm -cursor on 2>/dev/null || true
         return 1
     fi
 
@@ -454,44 +467,46 @@ main() {
             2 "Baja producto" \
             3 "Mostrar inventario" \
             4 "Editar producto" \
-            5 "Salir" \
-            2>&1 >/dev/tty)
+            5 "Salir")
         local rc=$?
         [[ $rc -ne 0 ]] && break   # usuario cerro el dialog
 
-        case $opcion in
-            $OPCION_ALTA)
+        # Limpiar espacios, saltos de linea y caracteres extra
+        opcion=$(printf '%s' "$opcion" | tr -d '[:space:]')
+
+        case "$opcion" in
+            "$OPCION_ALTA")
                 id=$(capturar_dialog dialog --clear --title "ALTA PRODUCTO" \
-                    --inputbox "Ingrese ID (0-$((MAX - 1))):" 0 0 2>&1 >/dev/tty)
+                    --inputbox "Ingrese ID (0-$((MAX - 1))):" 0 0)
                 [[ $? -ne 0 ]] && continue
 
                 p_temp[nombre]=$(capturar_dialog dialog --clear --title "ALTA PRODUCTO" \
-                    --inputbox "Ingrese Nombre:" 0 0 2>&1 >/dev/tty)
+                    --inputbox "Ingrese Nombre:" 0 0)
                 [[ $? -ne 0 ]] && continue
 
                 p_temp[precio]=$(capturar_dialog dialog --clear --title "ALTA PRODUCTO" \
-                    --inputbox "Ingrese Precio:" 0 0 2>&1 >/dev/tty)
+                    --inputbox "Ingrese Precio:" 0 0)
                 [[ $? -ne 0 ]] && continue
 
                 p_temp[activo]=1
                 alta "$id" p_temp
                 ;;
-            $OPCION_BAJA)
+            "$OPCION_BAJA")
                 id=$(capturar_dialog dialog --clear --title "BAJA PRODUCTO" \
-                    --inputbox "Ingrese ID a eliminar (0-$((MAX - 1))):" 0 0 2>&1 >/dev/tty)
+                    --inputbox "Ingrese ID a eliminar (0-$((MAX - 1))):" 0 0)
                 [[ $? -ne 0 ]] && continue
                 baja "$id"
                 ;;
-            $OPCION_MOSTRAR)
+            "$OPCION_MOSTRAR")
                 mostrar
                 ;;
-            $OPCION_EDITAR)
+            "$OPCION_EDITAR")
                 id=$(capturar_dialog dialog --clear --title "EDITAR PRODUCTO" \
-                    --inputbox "Ingrese ID a editar (0-$((MAX - 1))):" 0 0 2>&1 >/dev/tty)
+                    --inputbox "Ingrese ID a editar (0-$((MAX - 1))):" 0 0)
                 [[ $? -ne 0 ]] && continue
                 editar "$id"
                 ;;
-            $OPCION_SALIR)
+            "$OPCION_SALIR")
                 mostrar_mensaje "Salida" "Saliendo del programa..."
                 ;;
             *)
@@ -499,6 +514,9 @@ main() {
                 ;;
         esac
     done
+
+    # Reactivar el cursor del terminal al salir
+    setterm -cursor on 2>/dev/null || true
 
     return 0
 }
